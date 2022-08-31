@@ -106,6 +106,9 @@ def configure_options(argv) -> dict:
         elif argv[index] == '--tor':
 
             options['tor_connection'] = True
+            
+            index+=1
+            continue
 
         elif argv[index] == '--text-error':
 
@@ -152,12 +155,14 @@ def configure_options(argv) -> dict:
         elif argv[index] == '-v':
 
             options['verbose'] = True
+            
             index+=1
             continue
 
         elif argv[index] == '--random-agents':
 
             options['random_user_agents'] = True
+            
             index+=1
             continue
 
