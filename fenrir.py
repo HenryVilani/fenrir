@@ -3,7 +3,6 @@ import hashlib
 import imaplib
 import queue
 import sys
-import ssl
 import requests
 import ftplib
 import telnetlib
