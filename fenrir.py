@@ -102,7 +102,7 @@ def error_message():
 
 def alert_message(alert_msg):
 
-    print(f"[!] {alert_msg}")
+    cprint(f"[!] {alert_msg}", 'yellow')
 
 def help_command(command):
 
@@ -584,8 +584,6 @@ def intertool_wordlists(wordlists=[]):
 
     wordlist_out = queue.Queue(maxsize=1000)
 
-    wordlist_out_list = []
-
     wordlists_arr = []
     wordlist_temp = []
 
@@ -622,20 +620,12 @@ def intertool_wordlists(wordlists=[]):
 
                 return
 
-            try:
+            wordlist_out.put_nowait(product)
 
-                wordlist_out.put_nowait(product)
 
-            except queue.Full:
-
-                wordlist_out_list.append(wordlist_out)
-                with wordlist_out.mutex:
-                    wordlist_out.queue.clear()
-
-                wordlist_out.put_nowait(product)
 
         
-        return wordlist_out_list
+        return wordlist_out
 
     except KeyboardInterrupt:
 
@@ -794,8 +784,7 @@ def check_type_crack() -> str:
 
 def load_wordlist(wordlist_file):
 
-    wordlist_out = queue.Queue(maxsize=1000)
-    wordlist_out_list = []
+    wordlist_out = queue.Queue()
 
     try:
 
@@ -805,29 +794,17 @@ def load_wordlist(wordlist_file):
 
             for line in file:
 
-                try:
-
-                    wordlist_out.put_nowait(line.strip())
-
-                except queue.Full:
-
-                    wordlist_out_list.append(wordlist_out)
-                    
-                    with wordlist_out.mutex:
-                        wordlist_out.queue.clear()
-
-                    wordlist_out.put_nowait(line.strip())
-
-
-
-                    
+                  wordlist_out.put(line.strip())
 
     except KeyboardInterrupt:
+
         print("Bye                 ")
         exit()
+
     sys.stdout.flush()
     cprint("[+] Done               ", 'green')
-    return wordlist_out_list
+
+    return wordlist_out
 
 
 def crack_https_post(options, wordlists):
@@ -849,8 +826,7 @@ def crack_https_post(options, wordlists):
     cookie = {}
 
     session = requests.Session()
-    
-    queue_index = 0
+
 
     while True:
 
@@ -946,14 +922,9 @@ def crack_https_post(options, wordlists):
             try:
 
                 login = options['login']
-                password = wordlists[queue_index].get_nowait()
+                password = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -998,7 +969,7 @@ def crack_https_post(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
 
@@ -1010,7 +981,7 @@ def crack_https_post(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
         elif check_type_crack() == 'crack_login':
 
@@ -1020,19 +991,15 @@ def crack_https_post(options, wordlists):
 
             try:
 
-                login = wordlists[queue_index].get_nowait()
+                login = wordlists.get_nowait()
                 password = options['password']
 
             except queue.Empty:
 
-                queue_index+=1
-                continue
-
-            except IndexError:
-
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
                 continue
+
 
             data = parse_data(options['data'], login, password)
 
@@ -1071,7 +1038,7 @@ def crack_https_post(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
 
@@ -1083,7 +1050,7 @@ def crack_https_post(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
         else:
 
@@ -1091,14 +1058,9 @@ def crack_https_post(options, wordlists):
 
             try:
 
-                values = wordlists[queue_index].get_nowait()
+                values = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -1144,7 +1106,7 @@ def crack_https_post(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
 
@@ -1154,7 +1116,7 @@ def crack_https_post(options, wordlists):
 
                     cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
     if error_msg != "":
 
@@ -1184,8 +1146,6 @@ def crack_http_post(options, wordlists):
     cookie = {}
 
     session = requests.Session()
-
-    queue_index = 0
     
 
     while True:
@@ -1280,18 +1240,14 @@ def crack_http_post(options, wordlists):
             try:
 
                 login = options['login']
-                password = wordlists[queue_index].get_nowait()
+                password = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1 
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
                 continue
+
 
             data = parse_data(options['data'], login, password)
 
@@ -1330,7 +1286,7 @@ def crack_http_post(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
 
@@ -1342,7 +1298,7 @@ def crack_http_post(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
         elif check_type_crack() == 'crack_login':
 
@@ -1352,15 +1308,10 @@ def crack_http_post(options, wordlists):
 
             try:
 
-                login = wordlists[queue_index].get_nowait()
+                login = wordlists.get_nowait()
                 password = options['password']
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -1402,7 +1353,7 @@ def crack_http_post(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
 
@@ -1414,7 +1365,7 @@ def crack_http_post(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
         else:
 
@@ -1424,14 +1375,9 @@ def crack_http_post(options, wordlists):
 
             try:
 
-                values = wordlists[queue_index].get_nowait()
+                values = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -1478,7 +1424,7 @@ def crack_http_post(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
 
@@ -1488,7 +1434,7 @@ def crack_http_post(options, wordlists):
 
                     cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
 
     if error_msg != "":
@@ -1518,7 +1464,7 @@ def crack_ftp(options, wordlists):
 
     ftp = ftplib.FTP()
 
-    queue_index = 0
+    
 
     while True:
 
@@ -1577,14 +1523,9 @@ def crack_ftp(options, wordlists):
             try:
 
                 login = options['login']
-                password = wordlists[queue_index].get_nowait()
+                password = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -1605,7 +1546,7 @@ def crack_ftp(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1619,7 +1560,7 @@ def crack_ftp(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
             
             except TimeoutError:
 
@@ -1643,15 +1584,10 @@ def crack_ftp(options, wordlists):
 
             try:
 
-                login = wordlists[queue_index].get_nowait()
+                login = wordlists.get_nowait()
                 password = options['password']
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -1672,7 +1608,7 @@ def crack_ftp(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1686,7 +1622,7 @@ def crack_ftp(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -1710,14 +1646,9 @@ def crack_ftp(options, wordlists):
 
             try:
 
-                values = wordlists[queue_index].get_nowait()
+                values = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -1741,7 +1672,7 @@ def crack_ftp(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1755,7 +1686,7 @@ def crack_ftp(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except:
 
@@ -1793,7 +1724,7 @@ def crack_ftps(options, wordlists):
 
     ftps = ftplib.FTP_TLS()
 
-    queue_index = 0
+    
 
     while True:
 
@@ -1852,14 +1783,9 @@ def crack_ftps(options, wordlists):
             try:
 
                 login = options['login']
-                password = wordlists[queue_index].get_nowait()
+                password = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -1880,7 +1806,7 @@ def crack_ftps(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1894,7 +1820,7 @@ def crack_ftps(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
             
             except TimeoutError:
 
@@ -1918,15 +1844,10 @@ def crack_ftps(options, wordlists):
 
             try:
 
-                login = wordlists[queue_index].get_nowait()
+                login = wordlists.get_nowait()
                 password = options['password']
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -1947,7 +1868,7 @@ def crack_ftps(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1961,7 +1882,7 @@ def crack_ftps(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -1985,14 +1906,9 @@ def crack_ftps(options, wordlists):
 
             try:
 
-                values = wordlists[queue_index].get_nowait()
+                values = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -2016,7 +1932,7 @@ def crack_ftps(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
                 
@@ -2030,7 +1946,7 @@ def crack_ftps(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except:
 
@@ -2068,7 +1984,7 @@ def crack_telnet(options, wordlists):
 
     telnet = telnetlib.Telnet()
 
-    queue_index = 0
+    
 
     while True:
 
@@ -2138,14 +2054,9 @@ def crack_telnet(options, wordlists):
             try:
 
                 login = options['login']
-                password = wordlists[queue_index].get_nowait()
+                password = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -2171,7 +2082,7 @@ def crack_telnet(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
                 
@@ -2195,7 +2106,7 @@ def crack_telnet(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
             
             except:
 
@@ -2213,15 +2124,10 @@ def crack_telnet(options, wordlists):
 
             try:
             
-                login = wordlists[queue_index].get_nowait()
+                login = wordlists.get_nowait()
                 password = options['password']
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -2246,7 +2152,7 @@ def crack_telnet(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
                 
@@ -2271,7 +2177,7 @@ def crack_telnet(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
             
             except:
 
@@ -2289,14 +2195,9 @@ def crack_telnet(options, wordlists):
 
             try:
 
-                values = wordlists[queue_index].get_nowait()
+                values = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -2324,7 +2225,7 @@ def crack_telnet(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
                 stop_all_thread = True
                 continue
 
@@ -2348,7 +2249,7 @@ def crack_telnet(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
             
             except:
 
@@ -2383,7 +2284,7 @@ def crack_smtp(options, wordlists):
 
     proxy = {}
 
-    queue_index = 0
+    
 
     while True:
 
@@ -2454,14 +2355,9 @@ def crack_smtp(options, wordlists):
             try:
 
                 login = options['login']
-                password = wordlists[queue_index].get_nowait()
+                password = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -2492,7 +2388,7 @@ def crack_smtp(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except ConnectionRefusedError:
 
@@ -2516,15 +2412,10 @@ def crack_smtp(options, wordlists):
 
             try:
 
-                login = wordlists[queue_index].get_nowait()
+                login = wordlists.get_nowait()
                 password = options['password']
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -2555,7 +2446,7 @@ def crack_smtp(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except ConnectionRefusedError:
 
@@ -2579,14 +2470,9 @@ def crack_smtp(options, wordlists):
 
             try:
 
-                values = wordlists[queue_index].get_nowait()
+                values = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -2620,7 +2506,7 @@ def crack_smtp(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except ConnectionRefusedError:
 
@@ -2662,7 +2548,7 @@ def crack_smtps(options, wordlists):
 
     proxy = {}
 
-    queue_index = 0
+    
 
     while True:
 
@@ -2733,14 +2619,9 @@ def crack_smtps(options, wordlists):
             try:
 
                 login = options['login']
-                password = wordlists[queue_index].get_nowait()
+                password = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -2771,7 +2652,7 @@ def crack_smtps(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except ConnectionRefusedError:
 
@@ -2795,15 +2676,10 @@ def crack_smtps(options, wordlists):
 
             try:
 
-                login = wordlists[queue_index].get_nowait()
+                login = wordlists.get_nowait()
                 password = options['password']
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -2834,7 +2710,7 @@ def crack_smtps(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except ConnectionRefusedError:
 
@@ -2858,14 +2734,9 @@ def crack_smtps(options, wordlists):
 
             try:
 
-                values = wordlists[queue_index].get_nowait()
+                values = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -2899,7 +2770,7 @@ def crack_smtps(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except ConnectionRefusedError:
 
@@ -2941,7 +2812,7 @@ def crack_pop3(options, wordlists):
 
     proxy = {}
 
-    queue_index = 0
+    
 
     while True:
 
@@ -3007,14 +2878,9 @@ def crack_pop3(options, wordlists):
             try:
 
                 login = options['login']
-                password = wordlists[queue_index].get_nowait()
+                password = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -3047,7 +2913,7 @@ def crack_pop3(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -3065,15 +2931,10 @@ def crack_pop3(options, wordlists):
 
             try:
 
-                login = wordlists[queue_index].get_nowait()
+                login = wordlists.get_nowait()
                 password = options['password']
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -3105,7 +2966,7 @@ def crack_pop3(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -3123,14 +2984,9 @@ def crack_pop3(options, wordlists):
 
             try:
 
-                values = wordlists[queue_index].get_nowait()
+                values = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -3166,7 +3022,7 @@ def crack_pop3(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -3265,14 +3121,9 @@ def crack_pop3s(options, wordlists):
             try:
 
                 login = options['login']
-                password = wordlists[queue_index].get_nowait()
+                password = wordlists.get_nowait()
             
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -3304,7 +3155,7 @@ def crack_pop3s(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -3322,15 +3173,10 @@ def crack_pop3s(options, wordlists):
 
             try:
 
-                login = wordlists[queue_index].get_nowait()
+                login = wordlists.get_nowait()
                 password = options['password']
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -3362,7 +3208,7 @@ def crack_pop3s(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -3380,14 +3226,9 @@ def crack_pop3s(options, wordlists):
 
             try:
 
-                values = wordlists[queue_index].get_nowait()
+                values = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -3423,7 +3264,7 @@ def crack_pop3s(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -3458,7 +3299,7 @@ def crack_imap4(options, wordlists):
 
     proxy = {}
 
-    queue_index = 0
+    
 
     while True:
 
@@ -3523,14 +3364,9 @@ def crack_imap4(options, wordlists):
             try:
 
                 login = options['login']
-                password = wordlists[queue_index].get_nowait()
+                password = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -3562,7 +3398,7 @@ def crack_imap4(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -3580,15 +3416,10 @@ def crack_imap4(options, wordlists):
 
             try:
 
-                login = wordlists[queue_index].get_nowait()
+                login = wordlists.get_nowait()
                 password = options['password']
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -3619,7 +3450,7 @@ def crack_imap4(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -3637,14 +3468,9 @@ def crack_imap4(options, wordlists):
 
             try:
 
-                values = wordlists[queue_index].get_nowait()
+                values = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -3679,7 +3505,7 @@ def crack_imap4(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -3714,7 +3540,7 @@ def crack_imap4s(options, wordlists):
 
     proxy = {}
 
-    queue_index = 0
+    
 
     while True:
 
@@ -3779,14 +3605,9 @@ def crack_imap4s(options, wordlists):
             try:
 
                 login = options['login']
-                password = wordlists[queue_index].get_nowait()
+                password = wordlists.get_nowait()
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -3818,7 +3639,7 @@ def crack_imap4s(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -3836,15 +3657,10 @@ def crack_imap4s(options, wordlists):
 
             try:
             
-                login = wordlists[queue_index].get_nowait()
+                login = wordlists.get_nowait()
                 password = options['password']
 
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -3875,7 +3691,7 @@ def crack_imap4s(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
@@ -3893,14 +3709,9 @@ def crack_imap4s(options, wordlists):
 
             try:
 
-                values = wordlists[queue_index].get_nowait()
+                values = wordlists.get_nowait()
             
             except queue.Empty:
-
-                queue_index+=1
-                continue
-
-            except IndexError:
 
                 alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
@@ -3935,7 +3746,7 @@ def crack_imap4s(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists[queue_index].task_done()
+                wordlists.task_done()
 
             except TimeoutError:
 
