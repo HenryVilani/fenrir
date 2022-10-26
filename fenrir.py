@@ -26,12 +26,13 @@ tor_error = False
 msg_help = ""
 error_msg = ""
 
-# fenrir2v.py --protocol https-post --target 'site' --data '...&user=*&passw=*' -p test -pw wordlist.txt --encode-param 2 base64 --threads 25 -v --output log.txt --no-save
-# fenrir2v.py --help [command]
 
 def get_random_message():
 
-    m = ["We become hated both by doing good and by doing evil. - Maquiavel", "But man's ambition is so great that, in order to satisfy a present will, he does not think of the evil that may after some time result from it. - Maquiavel"]
+    m = ["We become hated both by doing good and by doing evil.",
+    "But man's ambition is so great that, in order to satisfy a present will, he does not think of the evil that may after some time result from it.",
+    "Give a man a gun and he\'ll rob a bank. Give a man a bank and he\'ll rob the world.",
+    "Men when they are not forced to fight for necessity, they fight for ambition."]
 
     return random.choice(m)
 
@@ -68,8 +69,8 @@ def help_message():
         print("\n")
 
         print("Options:")
-        print("  --target             set host to attack")
-        print("  --data             set data from request")
+        print("  --target           set host to attack")
+        print("  --data             set data from request [*USER* and *PASS* are passed as entries in --date, *USER* is passed as input to -l and -L and *PASS* is passed as input to -p and -P]")
         print("  -l                 set username")
         print("  -L                 set userame wordlist")
         print("  -p                 set password")
@@ -81,10 +82,14 @@ def help_message():
         print("  --success-text     set text when success logged")
         print("  --success-text     set status code when success logged")
         print("  --threads          set number of threads [default: 15]")
-        print("  --cookies          set specific cookies [default: automatic]")
+        print("  --cookies          set specific cookies")
         print("  --random-agent     use random users agents [default: not enabled]")
         print("  --encode-username  set encode to username, encodes supported: base85, base64, base32, base16")
-        print("  --encode-passwd  set encode to password, encodes supported: base85, base64, base32, base16")
+        print("  --encode-passwd    set encode to password, encodes supported: base85, base64, base32, base16")
+        print("  --list             used to list used to list something [protocols, encodes]")
+        print("  -h/--help          shows all help or shows the help of a specified metro")
+        print("  -o/--output        set output file, if the output file is not specified it will generate a default file called fenrir_output.txt")
+        print("  --no-verify        enables non-verification of the ssl certificate")
 
     exit()
 
@@ -92,7 +97,7 @@ def error_message():
 
     global error_msg
 
-    cprint(f"{error_message}", 'red')
+    cprint(f"{error_msg}", 'red')
     exit()
 
 def alert_message(alert_msg):
@@ -118,6 +123,21 @@ def help_command(command):
         print(" - imap4")
         print(" - imap4s")
     
+    elif command == "encodes":
+
+        print("Encodes:")
+        print(" - base16")
+        print(" - base32")
+        print(" - base64")
+        print(" - base85")
+        print(" - md2")
+        print(" - md5")
+        print(" - sha1")
+        print(" - sha224")
+        print(" - sha256")
+        print(" - sha384")
+        print(" - sha512")
+
     elif command == "--target":
 
         print("Syntax: --target [TARGET]")
@@ -224,6 +244,11 @@ def help_command(command):
         print("Syntax: --help [COMMAND] OR --help")
         print(" - Show command help or show general help")
 
+    elif command == "--no-verify":
+
+        print("Syntax: --no-verify")
+        print(" - Enables non-verification of the ssl certificate, used when the ssl certificate is expired")
+
     else:
 
         help_message()
@@ -253,7 +278,8 @@ def parse_options(argv) -> dict:
         "random_agents":False,
         "output_file":None,
         "port":0,
-        "list_protocols":False
+        "list_protocols":False,
+        "no_verify":False
     }
 
     index = 0
@@ -406,6 +432,11 @@ def parse_options(argv) -> dict:
                 help_command("protocols")
                 exit()
 
+            elif argv[index+1] == 'encodes':
+
+                help_command("encodes")
+                exit()
+
         elif argv[index] == '-o' or argv[index] == '--output':
 
             if argv[index+1] in options:
@@ -418,6 +449,13 @@ def parse_options(argv) -> dict:
 
             index+=1
             continue
+
+        elif argv[index] == '--no-verify':
+
+            options['no_verify'] = True
+            index+=1
+            continue
+
 
         else:
 
@@ -465,11 +503,14 @@ def append_output(credentials, options):
 
 def tor_is_connected() -> bool:
 
+    global random_user_agent
+
     proxy = {"http":"socks5://127.0.0.1:9050", "https":"socks5://127.0.0.1:9050"}
+    header = {"User-Agent":random_user_agent()}
 
     try:
 
-        check_tor_website = requests.get("https://check.torproject.org/", headers=user_agent, proxies=proxy)
+        check_tor_website = requests.get("https://check.torproject.org/", headers=header, proxies=proxy)
 
     except requests.exceptions.ConnectionError:
 
@@ -541,7 +582,9 @@ def intertool_wordlists(wordlists=[]):
 
     global stop_all_thread
 
-    wordlist_out = queue.Queue(maxsize=0)
+    wordlist_out = queue.Queue(maxsize=1000)
+
+    wordlist_out_list = []
 
     wordlists_arr = []
     wordlist_temp = []
@@ -579,9 +622,20 @@ def intertool_wordlists(wordlists=[]):
 
                 return
 
-            wordlist_out.put(product)
+            try:
+
+                wordlist_out.put_nowait(product)
+
+            except queue.Full:
+
+                wordlist_out_list.append(wordlist_out)
+                with wordlist_out.mutex:
+                    wordlist_out.queue.clear()
+
+                wordlist_out.put_nowait(product)
+
         
-        return wordlist_out
+        return wordlist_out_list
 
     except KeyboardInterrupt:
 
@@ -740,7 +794,8 @@ def check_type_crack() -> str:
 
 def load_wordlist(wordlist_file):
 
-    wordlist_out = queue.Queue(maxsize=0)
+    wordlist_out = queue.Queue(maxsize=1000)
+    wordlist_out_list = []
 
     try:
 
@@ -750,23 +805,44 @@ def load_wordlist(wordlist_file):
 
             for line in file:
 
-                wordlist_out.put(line.strip())
+                try:
+
+                    wordlist_out.put_nowait(line.strip())
+
+                except queue.Full:
+
+                    wordlist_out_list.append(wordlist_out)
+                    
+                    with wordlist_out.mutex:
+                        wordlist_out.queue.clear()
+
+                    wordlist_out.put_nowait(line.strip())
+
+
+
+                    
 
     except KeyboardInterrupt:
         print("Bye                 ")
         exit()
     sys.stdout.flush()
     cprint("[+] Done               ", 'green')
-    return wordlist_out
+    return wordlist_out_list
 
 
 def crack_https_post(options, wordlists):
 
     global tor_error
-    global user_agent
     global stop_all_thread
     global error_msg
     global found_credentials
+    global random_user_agent
+    global error_message
+    global parse_data
+    global tor_is_connected
+    global is_logged
+    global parse_cookies
+    global alert_message
 
     header = {}
     proxy = {}
@@ -774,6 +850,7 @@ def crack_https_post(options, wordlists):
 
     session = requests.Session()
     
+    queue_index = 0
 
     while True:
 
@@ -802,6 +879,11 @@ def crack_https_post(options, wordlists):
 
             cookie = parse_cookies(options['cookies'])
 
+        if options['no_verify']:
+
+            requests.packages.urllib3.disable_warnings()
+
+
 
         if check_type_crack() == 'normal_login':
 
@@ -813,12 +895,19 @@ def crack_https_post(options, wordlists):
 
             try:
 
-                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy, cookies=cookie)
+                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy, cookies=cookie, verify=not options['no_verify'])
 
             except requests.exceptions.InvalidSchema:
 
                 error_msg = "[ERROR] Invalid target url"
                 stop_all_thread = True 
+                continue
+
+
+            except requests.exceptions.SSLError:
+
+                error_msg = "Expired SSL certificate, use --no-verify not to check the SSL cerficate"
+                stop_all_thread = True
                 continue
 
             except requests.exceptions.ConnectionError:
@@ -839,7 +928,7 @@ def crack_https_post(options, wordlists):
 
                     if stop_all_thread == False:
 
-                        cprint(f"[TRIED] LOGIN: {options['login']} PASSWORD: {options['password']}", 'cyan')
+                        cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
             else:
 
@@ -850,64 +939,33 @@ def crack_https_post(options, wordlists):
 
         elif check_type_crack() == 'crack_password':
 
-            login = options['login']
-            password = wordlists.get()
-
-            data = parse_data(options['data'], login, password)
-
+            login = ""
+            password = ""
+            primary_request = ""
+            
             try:
 
-                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy)
+                login = options['login']
+                password = wordlists[queue_index].get_nowait()
 
-            except requests.exceptions.InvalidSchema:
+            except queue.Empty:
 
-                error_msg = "[ERROR] Invalid target url"
-                stop_all_thread = True 
+                queue_index+=1
                 continue
 
-            except requests.exceptions.ConnectionError:
+            except IndexError:
 
-                if options['tor_connection']:
-
-                    if tor_is_connected() == False:
-
-                        tor_error = True                
-
-                    stop_all_thread = True
-                    error_msg = "[CRITICAL] CONNECTION ERROR"
-                    continue
-                    # quando sair mostrar o erro
-
-
-            if is_logged(primary_request, options):
-
-                found_credentials['login'] = login
-                found_credentials['password'] = password
-
-                wordlists.task_done()
+                alert_message("credentials not found with this wordlist")
                 stop_all_thread = True
                 continue
 
-            else:
-
-                if options['verbose']:
-
-                    if stop_all_thread == False:
-
-                        cprint(f"[TRIED] LOGIN: {options['login']} PASSWORD: {options['password']}", 'cyan')
-
-                wordlists.task_done()
-
-        elif check_type_crack() == 'crack_login':
-
-            login = wordlists.get()
-            password = options['password']
-
             data = parse_data(options['data'], login, password)
 
             try:
 
-                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy)
+                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy, cookies=cookie, verify=not options['no_verify'])
+
+                
 
             except requests.exceptions.InvalidSchema:
 
@@ -915,7 +973,14 @@ def crack_https_post(options, wordlists):
                 stop_all_thread = True 
                 continue
 
-            except requests.exceptions.ConnectionError:
+            except requests.exceptions.SSLError:
+
+                error_msg = "Expired SSL certificate, use --no-verify not to check the SSL cerficate"
+                stop_all_thread = True
+                continue
+
+            except requests.exceptions.ConnectionError as err:
+
 
                 if options['tor_connection']:
 
@@ -933,7 +998,7 @@ def crack_https_post(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
 
@@ -945,25 +1010,47 @@ def crack_https_post(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
-        else:
+        elif check_type_crack() == 'crack_login':
 
-            values = wordlists.get()
+            login = ""
+            password = ""
+            primary_request = ""
 
-            login = values[0]
-            password = values[1]
+            try:
+
+                login = wordlists[queue_index].get_nowait()
+                password = options['password']
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             data = parse_data(options['data'], login, password)
 
             try:
 
-                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy)
+                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy, cookies=cookie, verify=not options['no_verify'])
 
             except requests.exceptions.InvalidSchema:
 
                 error_msg = "[ERROR] Invalid target url"
                 stop_all_thread = True 
+                continue
+
+
+            except requests.exceptions.SSLError:
+
+                error_msg = "Expired SSL certificate, use --no-verify not to check the SSL cerficate"
+                stop_all_thread = True
                 continue
 
             except requests.exceptions.ConnectionError:
@@ -984,7 +1071,7 @@ def crack_https_post(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
 
@@ -992,10 +1079,86 @@ def crack_https_post(options, wordlists):
 
                 if options['verbose']:
 
-                    cprint(f"[TRIED] LOGIN: {options['login']} PASSWORD: {options['password']}", 'cyan')
+                    if stop_all_thread == False:
 
-                wordlists.task_done()
+                        cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
+                wordlists[queue_index].task_done()
+
+        else:
+
+            values = ""
+
+            try:
+
+                values = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
+
+            login = values[0]
+            password = values[1]
+
+            data = parse_data(options['data'], login, password)
+
+            try:
+
+                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy, cookies=cookie, verify=not options['no_verify'])
+
+            except requests.exceptions.InvalidSchema:
+
+                error_msg = "[ERROR] Invalid target url"
+                stop_all_thread = True 
+                continue
+
+
+            except requests.exceptions.SSLError:
+
+                error_msg = "Expired SSL certificate, use --no-verify not to check the SSL cerficate"
+                stop_all_thread = True
+                continue
+
+            except requests.exceptions.ConnectionError:
+
+                if options['tor_connection']:
+
+                    if tor_is_connected() == False:
+
+                        tor_error = True                
+
+                    stop_all_thread = True
+                    error_msg = "[CRITICAL] CONNECTION ERROR"
+                    continue
+
+
+            if is_logged(primary_request, options):
+
+                found_credentials['login'] = login
+                found_credentials['password'] = password
+
+                wordlists[queue_index].task_done()
+                stop_all_thread = True
+                continue
+
+            else:
+
+                if options['verbose']:
+
+                    cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
+
+                wordlists[queue_index].task_done()
+
+    if error_msg != "":
+
+        error_message()
     
     if tor_error:
 
@@ -1006,16 +1169,23 @@ def crack_https_post(options, wordlists):
 def crack_http_post(options, wordlists):
 
     global tor_error
-    global user_agent
     global stop_all_thread
     global error_msg
     global found_credentials
+    global random_user_agent
+    global error_message
+    global parse_data
+    global tor_is_connected
+    global is_logged
+    global parse_cookies
 
     header = {}
     proxy = {}
     cookie = {}
 
     session = requests.Session()
+
+    queue_index = 0
     
 
     while True:
@@ -1045,6 +1215,10 @@ def crack_http_post(options, wordlists):
 
             cookie = parse_cookies(options['cookies'])
 
+        if options['no_verify']:
+
+            requests.packages.urllib3.disable_warnings()
+
 
         if check_type_crack() == 'normal_login':
 
@@ -1056,12 +1230,18 @@ def crack_http_post(options, wordlists):
 
             try:
 
-                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy, cookies=cookie)
+                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy, cookies=cookie, verify=not options['no_verify'])
 
             except requests.exceptions.InvalidSchema:
 
                 error_msg = "[ERROR] Invalid target url"
                 stop_all_thread = True 
+                continue
+
+            except requests.exceptions.SSLError:
+
+                error_msg = "Expired SSL certificate, use --no-verify not to check the SSL cerficate"
+                stop_all_thread = True
                 continue
 
             except requests.exceptions.ConnectionError:
@@ -1082,7 +1262,7 @@ def crack_http_post(options, wordlists):
 
                     if stop_all_thread == False:
 
-                        cprint(f"[TRIED] LOGIN: {options['login']} PASSWORD: {options['password']}", 'cyan')
+                        cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
             else:
 
@@ -1093,19 +1273,42 @@ def crack_http_post(options, wordlists):
 
         elif check_type_crack() == 'crack_password':
 
-            login = options['login']
-            password = wordlists.get()
+            login = ""
+            password = ""
+            primary_request = ""
+
+            try:
+
+                login = options['login']
+                password = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1 
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             data = parse_data(options['data'], login, password)
 
             try:
 
-                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy)
+                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy, cookies=cookie, verify=not options['no_verify'])
 
             except requests.exceptions.InvalidSchema:
 
                 error_msg = "[ERROR] Invalid target url"
                 stop_all_thread = True 
+                continue
+
+            except requests.exceptions.SSLError:
+
+                error_msg = "Expired SSL certificate, use --no-verify not to check the SSL cerficate"
+                stop_all_thread = True
                 continue
 
             except requests.exceptions.ConnectionError:
@@ -1127,56 +1330,7 @@ def crack_http_post(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
-                stop_all_thread = True
-                continue
-
-            else:
-
-                if options['verbose']:
-
-                    if stop_all_thread == False:
-
-                        cprint(f"[TRIED] LOGIN: {options['login']} PASSWORD: {options['password']}", 'cyan')
-
-                wordlists.task_done()
-
-        elif check_type_crack() == 'crack_login':
-
-            login = wordlists.get()
-            password = options['password']
-
-            data = parse_data(options['data'], login, password)
-
-            try:
-
-                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy)
-
-            except requests.exceptions.InvalidSchema:
-
-                error_msg = "[ERROR] Invalid target url"
-                stop_all_thread = True 
-                continue
-
-            except requests.exceptions.ConnectionError:
-
-                if options['tor_connection']:
-
-                    if tor_is_connected() == False:
-
-                        tor_error = True                
-
-                    stop_all_thread = True
-                    error_msg = "[CRITICAL] CONNECTION ERROR"
-                    continue
-
-
-            if is_logged(primary_request, options):
-
-                found_credentials['login'] = login
-                found_credentials['password'] = password
-
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
 
@@ -1188,25 +1342,46 @@ def crack_http_post(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
-        else:
+        elif check_type_crack() == 'crack_login':
 
-            values = wordlists.get()
+            login = ""
+            password = ""
+            primary_request = ""
 
-            login = values[0]
-            password = values[1]
+            try:
+
+                login = wordlists[queue_index].get_nowait()
+                password = options['password']
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             data = parse_data(options['data'], login, password)
 
             try:
 
-                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy)
+                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy, cookies=cookie, verify=not options['no_verify'])
 
             except requests.exceptions.InvalidSchema:
 
                 error_msg = "[ERROR] Invalid target url"
                 stop_all_thread = True 
+                continue
+
+            except requests.exceptions.SSLError:
+
+                error_msg = "Expired SSL certificate, use --no-verify not to check the SSL cerficate"
+                stop_all_thread = True
                 continue
 
             except requests.exceptions.ConnectionError:
@@ -1227,7 +1402,7 @@ def crack_http_post(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
 
@@ -1235,10 +1410,90 @@ def crack_http_post(options, wordlists):
 
                 if options['verbose']:
 
-                    cprint(f"[TRIED] LOGIN: {options['login']} PASSWORD: {options['password']}", 'cyan')
+                    if stop_all_thread == False:
 
-                wordlists.task_done()
+                        cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
+                wordlists[queue_index].task_done()
+
+        else:
+
+            login = ""
+            password = ""
+            primary_request = ""
+
+            try:
+
+                values = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
+
+
+
+            login = values[0]
+            password = values[1]
+
+            data = parse_data(options['data'], login, password)
+
+            try:
+
+                primary_request = session.post(options['target'], data=data, headers=header, proxies=proxy, cookies=cookie, verify=not options['no_verify'])
+
+            except requests.exceptions.InvalidSchema:
+
+                error_msg = "[ERROR] Invalid target url"
+                stop_all_thread = True 
+                continue
+
+            except requests.exceptions.SSLError:
+
+                error_msg = "Expired SSL certificate, use --no-verify not to check the SSL cerficate"
+                stop_all_thread = True
+                continue
+
+            except requests.exceptions.ConnectionError:
+
+                if options['tor_connection']:
+
+                    if tor_is_connected() == False:
+
+                        tor_error = True                
+
+                    stop_all_thread = True
+                    error_msg = "[CRITICAL] CONNECTION ERROR"
+                    continue
+
+
+            if is_logged(primary_request, options):
+
+                found_credentials['login'] = login
+                found_credentials['password'] = password
+
+                wordlists[queue_index].task_done()
+                stop_all_thread = True
+                continue
+
+            else:
+
+                if options['verbose']:
+
+                    cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
+
+                wordlists[queue_index].task_done()
+
+
+    if error_msg != "":
+
+        error_message()
     
     if tor_error:
 
@@ -1249,14 +1504,21 @@ def crack_http_post(options, wordlists):
 def crack_ftp(options, wordlists):
 
     global tor_error
-    global user_agent
     global stop_all_thread
     global error_msg
     global found_credentials
+    global random_user_agent
+    global error_message
+    global parse_data
+    global tor_is_connected
+    global is_logged
+    global parse_cookies
 
     proxy = {}
 
     ftp = ftplib.FTP()
+
+    queue_index = 0
 
     while True:
 
@@ -1312,8 +1574,21 @@ def crack_ftp(options, wordlists):
 
         elif check_type_crack() == 'crack_password':
 
-            login = options['login']
-            password = wordlists.get()
+            try:
+
+                login = options['login']
+                password = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -1330,7 +1605,7 @@ def crack_ftp(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1344,7 +1619,7 @@ def crack_ftp(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
             
             except TimeoutError:
 
@@ -1365,8 +1640,22 @@ def crack_ftp(options, wordlists):
                     continue
 
         elif check_type_crack() == 'crack_login':
-            login = wordlists.get()
-            password = options['password']
+
+            try:
+
+                login = wordlists[queue_index].get_nowait()
+                password = options['password']
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -1383,7 +1672,7 @@ def crack_ftp(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1397,7 +1686,7 @@ def crack_ftp(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -1419,7 +1708,20 @@ def crack_ftp(options, wordlists):
 
         else:
 
-            values = wordlists.get()
+            try:
+
+                values = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             login = values[0]
             password = values[1]
@@ -1439,7 +1741,7 @@ def crack_ftp(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1453,7 +1755,7 @@ def crack_ftp(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except:
 
@@ -1477,14 +1779,21 @@ def crack_ftp(options, wordlists):
 def crack_ftps(options, wordlists):
 
     global tor_error
-    global user_agent
     global stop_all_thread
     global error_msg
     global found_credentials
+    global random_user_agent
+    global error_message
+    global parse_data
+    global tor_is_connected
+    global is_logged
+    global parse_cookies
 
     proxy = {}
 
     ftps = ftplib.FTP_TLS()
+
+    queue_index = 0
 
     while True:
 
@@ -1540,8 +1849,21 @@ def crack_ftps(options, wordlists):
 
         elif check_type_crack() == 'crack_password':
 
-            login = options['login']
-            password = wordlists.get()
+            try:
+
+                login = options['login']
+                password = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -1558,7 +1880,7 @@ def crack_ftps(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1572,7 +1894,7 @@ def crack_ftps(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
             
             except TimeoutError:
 
@@ -1593,8 +1915,22 @@ def crack_ftps(options, wordlists):
                     continue
 
         elif check_type_crack() == 'crack_login':
-            login = wordlists.get()
-            password = options['password']
+
+            try:
+
+                login = wordlists[queue_index].get_nowait()
+                password = options['password']
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -1611,7 +1947,7 @@ def crack_ftps(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1625,7 +1961,7 @@ def crack_ftps(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -1647,7 +1983,20 @@ def crack_ftps(options, wordlists):
 
         else:
 
-            values = wordlists.get()
+            try:
+
+                values = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             login = values[0]
             password = values[1]
@@ -1667,7 +2016,7 @@ def crack_ftps(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1681,7 +2030,7 @@ def crack_ftps(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except:
 
@@ -1705,14 +2054,21 @@ def crack_ftps(options, wordlists):
 def crack_telnet(options, wordlists):
     
     global tor_error
-    global user_agent
     global stop_all_thread
     global error_msg
     global found_credentials
+    global random_user_agent
+    global error_message
+    global parse_data
+    global tor_is_connected
+    global is_logged
+    global parse_cookies
 
     proxy = {}
 
     telnet = telnetlib.Telnet()
+
+    queue_index = 0
 
     while True:
 
@@ -1779,8 +2135,22 @@ def crack_telnet(options, wordlists):
 
         elif check_type_crack() == 'crack_password':
 
-            login = options['login']
-            password = wordlists.get()
+            try:
+
+                login = options['login']
+                password = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
+
 
             try:
 
@@ -1801,7 +2171,7 @@ def crack_telnet(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1825,7 +2195,7 @@ def crack_telnet(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
             
             except:
 
@@ -1840,9 +2210,22 @@ def crack_telnet(options, wordlists):
                     continue
 
         elif check_type_crack() == 'crack_login':
+
+            try:
             
-            login = wordlists.get()
-            password = options['password']
+                login = wordlists[queue_index].get_nowait()
+                password = options['password']
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -1863,7 +2246,7 @@ def crack_telnet(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
                 
@@ -1888,7 +2271,7 @@ def crack_telnet(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
             
             except:
 
@@ -1904,7 +2287,20 @@ def crack_telnet(options, wordlists):
 
         else:
 
-            values = wordlists.get()
+            try:
+
+                values = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             login = values[0]
             password = values[1]
@@ -1928,7 +2324,7 @@ def crack_telnet(options, wordlists):
                 found_credentials['login'] = login
                 found_credentials['password'] = password
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
                 stop_all_thread = True
                 continue
 
@@ -1952,7 +2348,7 @@ def crack_telnet(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
             
             except:
 
@@ -1975,14 +2371,19 @@ def crack_telnet(options, wordlists):
 def crack_smtp(options, wordlists):
     
     global tor_error
-    global user_agent
     global stop_all_thread
     global error_msg
     global found_credentials
+    global random_user_agent
+    global error_message
+    global parse_data
+    global tor_is_connected
+    global is_logged
+    global parse_cookies
 
     proxy = {}
 
-    
+    queue_index = 0
 
     while True:
 
@@ -2050,8 +2451,21 @@ def crack_smtp(options, wordlists):
 
         elif check_type_crack() == 'crack_password':
 
-            login = options['login']
-            password = wordlists.get()
+            try:
+
+                login = options['login']
+                password = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -2078,7 +2492,7 @@ def crack_smtp(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except ConnectionRefusedError:
 
@@ -2099,8 +2513,22 @@ def crack_smtp(options, wordlists):
                 continue
 
         elif check_type_crack() == 'crack_login':
-            login = wordlists.get()
-            password = options['password']
+
+            try:
+
+                login = wordlists[queue_index].get_nowait()
+                password = options['password']
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -2127,7 +2555,7 @@ def crack_smtp(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except ConnectionRefusedError:
 
@@ -2149,7 +2577,20 @@ def crack_smtp(options, wordlists):
 
         else:
 
-            values = wordlists.get()
+            try:
+
+                values = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             login = values[0]
             password = values[1]
@@ -2179,7 +2620,7 @@ def crack_smtp(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except ConnectionRefusedError:
 
@@ -2209,14 +2650,19 @@ def crack_smtp(options, wordlists):
 def crack_smtps(options, wordlists):
     
     global tor_error
-    global user_agent
     global stop_all_thread
     global error_msg
     global found_credentials
+    global random_user_agent
+    global error_message
+    global parse_data
+    global tor_is_connected
+    global is_logged
+    global parse_cookies
 
     proxy = {}
 
-    
+    queue_index = 0
 
     while True:
 
@@ -2284,8 +2730,21 @@ def crack_smtps(options, wordlists):
 
         elif check_type_crack() == 'crack_password':
 
-            login = options['login']
-            password = wordlists.get()
+            try:
+
+                login = options['login']
+                password = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -2312,7 +2771,7 @@ def crack_smtps(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except ConnectionRefusedError:
 
@@ -2333,8 +2792,22 @@ def crack_smtps(options, wordlists):
                 continue
 
         elif check_type_crack() == 'crack_login':
-            login = wordlists.get()
-            password = options['password']
+
+            try:
+
+                login = wordlists[queue_index].get_nowait()
+                password = options['password']
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -2361,7 +2834,7 @@ def crack_smtps(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except ConnectionRefusedError:
 
@@ -2383,7 +2856,20 @@ def crack_smtps(options, wordlists):
 
         else:
 
-            values = wordlists.get()
+            try:
+
+                values = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             login = values[0]
             password = values[1]
@@ -2413,7 +2899,7 @@ def crack_smtps(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except ConnectionRefusedError:
 
@@ -2443,12 +2929,19 @@ def crack_smtps(options, wordlists):
 def crack_pop3(options, wordlists):
 
     global tor_error
-    global user_agent
     global stop_all_thread
     global error_msg
     global found_credentials
+    global random_user_agent
+    global error_message
+    global parse_data
+    global tor_is_connected
+    global is_logged
+    global parse_cookies
 
     proxy = {}
+
+    queue_index = 0
 
     while True:
 
@@ -2511,8 +3004,21 @@ def crack_pop3(options, wordlists):
 
         elif check_type_crack() == 'crack_password':
 
-            login = options['login']
-            password = wordlists.get()
+            try:
+
+                login = options['login']
+                password = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -2541,7 +3047,7 @@ def crack_pop3(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -2556,8 +3062,22 @@ def crack_pop3(options, wordlists):
                 continue
 
         elif check_type_crack() == 'crack_login':
-            login = wordlists.get()
-            password = options['password']
+
+            try:
+
+                login = wordlists[queue_index].get_nowait()
+                password = options['password']
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -2585,7 +3105,7 @@ def crack_pop3(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -2601,7 +3121,20 @@ def crack_pop3(options, wordlists):
 
         else:
 
-            values = wordlists.get()
+            try:
+
+                values = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             login = values[0]
             password = values[1]
@@ -2633,7 +3166,7 @@ def crack_pop3(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -2656,10 +3189,15 @@ def crack_pop3(options, wordlists):
 def crack_pop3s(options, wordlists):
 
     global tor_error
-    global user_agent
     global stop_all_thread
     global error_msg
     global found_credentials
+    global random_user_agent
+    global error_message
+    global parse_data
+    global tor_is_connected
+    global is_logged
+    global parse_cookies
 
     proxy = {}
 
@@ -2724,8 +3262,21 @@ def crack_pop3s(options, wordlists):
 
         elif check_type_crack() == 'crack_password':
 
-            login = options['login']
-            password = wordlists.get()
+            try:
+
+                login = options['login']
+                password = wordlists[queue_index].get_nowait()
+            
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -2753,7 +3304,7 @@ def crack_pop3s(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -2768,8 +3319,22 @@ def crack_pop3s(options, wordlists):
                 continue
 
         elif check_type_crack() == 'crack_login':
-            login = wordlists.get()
-            password = options['password']
+
+            try:
+
+                login = wordlists[queue_index].get_nowait()
+                password = options['password']
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -2797,7 +3362,7 @@ def crack_pop3s(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -2813,7 +3378,20 @@ def crack_pop3s(options, wordlists):
 
         else:
 
-            values = wordlists.get()
+            try:
+
+                values = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             login = values[0]
             password = values[1]
@@ -2845,7 +3423,7 @@ def crack_pop3s(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -2868,12 +3446,19 @@ def crack_pop3s(options, wordlists):
 def crack_imap4(options, wordlists):
 
     global tor_error
-    global user_agent
     global stop_all_thread
     global error_msg
     global found_credentials
+    global random_user_agent
+    global error_message
+    global parse_data
+    global tor_is_connected
+    global is_logged
+    global parse_cookies
 
     proxy = {}
+
+    queue_index = 0
 
     while True:
 
@@ -2935,8 +3520,21 @@ def crack_imap4(options, wordlists):
 
         elif check_type_crack() == 'crack_password':
 
-            login = options['login']
-            password = wordlists.get()
+            try:
+
+                login = options['login']
+                password = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -2964,7 +3562,7 @@ def crack_imap4(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -2979,8 +3577,22 @@ def crack_imap4(options, wordlists):
                 continue
 
         elif check_type_crack() == 'crack_login':
-            login = wordlists.get()
-            password = options['password']
+
+            try:
+
+                login = wordlists[queue_index].get_nowait()
+                password = options['password']
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -3007,7 +3619,7 @@ def crack_imap4(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -3023,7 +3635,20 @@ def crack_imap4(options, wordlists):
 
         else:
 
-            values = wordlists.get()
+            try:
+
+                values = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             login = values[0]
             password = values[1]
@@ -3054,7 +3679,7 @@ def crack_imap4(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -3077,12 +3702,19 @@ def crack_imap4(options, wordlists):
 def crack_imap4s(options, wordlists):
 
     global tor_error
-    global user_agent
     global stop_all_thread
     global error_msg
     global found_credentials
+    global random_user_agent
+    global error_message
+    global parse_data
+    global tor_is_connected
+    global is_logged
+    global parse_cookies
 
     proxy = {}
+
+    queue_index = 0
 
     while True:
 
@@ -3144,8 +3776,21 @@ def crack_imap4s(options, wordlists):
 
         elif check_type_crack() == 'crack_password':
 
-            login = options['login']
-            password = wordlists.get()
+            try:
+
+                login = options['login']
+                password = wordlists[queue_index].get_nowait()
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -3173,7 +3818,7 @@ def crack_imap4s(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -3188,8 +3833,22 @@ def crack_imap4s(options, wordlists):
                 continue
 
         elif check_type_crack() == 'crack_login':
-            login = wordlists.get()
-            password = options['password']
+
+            try:
+            
+                login = wordlists[queue_index].get_nowait()
+                password = options['password']
+
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             try:
 
@@ -3216,7 +3875,7 @@ def crack_imap4s(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -3232,7 +3891,20 @@ def crack_imap4s(options, wordlists):
 
         else:
 
-            values = wordlists.get()
+            try:
+
+                values = wordlists[queue_index].get_nowait()
+            
+            except queue.Empty:
+
+                queue_index+=1
+                continue
+
+            except IndexError:
+
+                alert_message("credentials not found with this wordlist")
+                stop_all_thread = True
+                continue
 
             login = values[0]
             password = values[1]
@@ -3263,7 +3935,7 @@ def crack_imap4s(options, wordlists):
 
                         cprint(f"[TRIED] LOGIN: {login} PASSWORD: {password}", 'cyan')
 
-                wordlists.task_done()
+                wordlists[queue_index].task_done()
 
             except TimeoutError:
 
@@ -3302,6 +3974,7 @@ def fenrir(options):
         if check_type_crack() == 'crack_password':
 
             wordlist = load_wordlist(options['password_wordlist'])
+            
 
         elif check_type_crack() == 'crack_login':
 
